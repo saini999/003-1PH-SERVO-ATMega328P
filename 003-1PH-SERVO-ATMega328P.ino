@@ -1,25 +1,33 @@
 /*
 Project: NAS-002-1PH-SERVO
 Description: Automatic Voltage Stablizer Control for Single Phase AC Supply
-Project URL: https://github.com/saini999/002-1PH-SERVO
+Project URL: https://github.com/saini999/003-1PH-SERVO-ATMega238P
 Author: saini999, https://github.com/saini999 // Discord: N00R#2080
 
-Arduino Board: Arduino Mega2560 ( Changed to Mega2560 from Uno due to less IOs on Uno)
+////////////////////////////////////////////////////
+//// THIS WILL NOT WORK WITH ARDUINO UNO BOARD /////
+/////// Due to less I/O Pins on UNO Board //////////
+////////////////////////////////////////////////////
 
-Project Start Date: 16-Nov-2022
-Last Update: 16-Nov-2022
+MCU: ATMega328P (28Pin PDIP)
+MCU Arduino Core: MiniCore by MCUDude //https://github.com/MCUdude/MiniCore
+MCU Clock: 8Mhz (Internal Oscillator)
+Will only work with Internal Oscillator as Occillator Pins are being used as I/O.
 
-Input Voltage: Pin A0 (Through Voltage Divider)
-Output Voltage: Pin A1 (Through Voltage Divider)
-Current CT Sensor: Pin A2 (Through Voltage Divider)
+Project Start Date: 17-Nov-2022
+Last Update: 17-Nov-2022
 
-Servo Motor Forward: Pin 5
-Servo Motor Reverse: Pin 6
+Input Voltage: Pin PC0 (Through Voltage Divider)
+Output Voltage: Pin PC1 (Through Voltage Divider)
+Current CT Sensor: Pin PC2 (Through Voltage Divider)
 
-ok/Menu button: Pin 2
-plus/Up button: Pin 3
-minus/Down button: Pin 4
-setup/Settings button: Pin 7
+Servo Motor Forward: Pin PB6
+Servo Motor Reverse: Pin PB7
+
+ok/Menu button: Pin PC3
+plus/Up button: Pin PC4
+minus/Down button: Pin PC5
+setup/Settings button: Pin PB4
 
 Parameters: IHu/IHv = Input High Voltage
             ILu/ILv = Input Low Voltage
@@ -61,16 +69,16 @@ int TON;
 int TOFF;
 int DIFF;
 int enc;
-const int ok = 2;
-const int plus = 3;
-const int minus = 4;
-const int setupPin = 7;
-const int inVolt = A0;
-const int outVolt = A1;
-const int current = A2;
-const int motor0Fwd = 5;
-const int motor0Rev = 6;
-const int power = 22;
+const int ok = PIN_PC3;
+const int plus = PIN_PC4;
+const int minus = PIN_PC5;
+const int setupPin = PIN_PB4;
+const int inVolt = PIN_PC0;
+const int outVolt = PIN_PC1;
+const int current = PIN_PC2;
+const int motor0Fwd = PIN_PB6;
+const int motor0Rev = PIN_PB7;
+const int power = PIN_PB5;
 int encMenu;
 int menu;
 //int encMenu = 0;
@@ -562,20 +570,20 @@ void display(String str, int deci) {
 void setupDisplay() {
     int displayType = COMMON_CATHODE;
 
-   int digit1 = 50; 
-   int digit2 = 51; 
-   int digit3 = 52; 
-   int digit4 = 53; 
+   int digit1 = PIN_PB0; 
+   int digit2 = PIN_PB1; 
+   int digit3 = PIN_PB2; 
+   int digit4 = PIN_PB3; 
    
    
-   int segA = 42; 
-   int segB = 43;
-   int segC = 44; 
-   int segD = 45; 
-   int segE = 46; 
-   int segF = 47; 
-   int segG = 48; 
-   int segDP = 49; 
+   int segA = PIN_PD0; 
+   int segB = PIN_PD1;
+   int segC = PIN_PD2; 
+   int segD = PIN_PD3; 
+   int segE = PIN_PD4; 
+   int segF = PIN_PD5; 
+   int segG = PIN_PD6; 
+   int segDP = PIN_PD7; 
    
   int numberOfDigits = 4; 
 
