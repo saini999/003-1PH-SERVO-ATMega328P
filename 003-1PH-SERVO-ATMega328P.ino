@@ -29,6 +29,8 @@ plus/Up button: Pin PC4
 minus/Down button: Pin PC5
 setup/Settings button: Pin PB4
 
+Display I/O are Defined in setupDisplay() function at the end of the code.
+
 Parameters: IHu/IHv = Input High Voltage
             ILu/ILv = Input Low Voltage
             OHu/OHv = Output High Voltage
