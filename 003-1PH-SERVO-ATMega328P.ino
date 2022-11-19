@@ -20,14 +20,16 @@ Last Update: 17-Nov-2022
 Input Voltage: Pin PC0 (Through Voltage Divider)
 Output Voltage: Pin PC1 (Through Voltage Divider)
 Current CT Sensor: Pin PC2 (Through Voltage Divider)
-
-Servo Motor Forward: Pin PB6
-Servo Motor Reverse: Pin PB7
-
-ok/Menu button: Pin PC3
-plus/Up button: Pin PC4
-minus/Down button: Pin PC5
-setup/Settings button: Pin PB4
+Input AC supply for Frequency: Pin PB4 (Through Voltage Divider) ----------------+
+                                                                                 | Same Pin
+Servo Motor Forward: Pin PB6                                                     | Using as Frequency
+Servo Motor Reverse: Pin PB7                                                     | Input
+                                                                                 | 
+ok/Menu button: Pin PC3                                                          | 
+                                                                                 | To Open Setup
+plus/Up button: Pin PC4                                                          | Press all buttons
+minus/Down button: Pin PC5                                                       | at same time
+setup/Settings button: Pin PB4 --------------------------------------------------+ 
 
 Display I/O are Defined in setupDisplay() function at the end of the code.
 
@@ -40,7 +42,11 @@ Parameters: IHu/IHv = Input High Voltage
             TOn = Relay/Contactor ON Delay
             TOff = Relay/Contactor CUTOFF Delay
             DIFF = Voltage Difference from Set Voltage
-            
+
+Run Mode Display: InPu/InPv = Current Input Voltage
+                  Outu/Outv = Current Output Voltage
+                  LoAd =  Current (in Ampere)
+                  FrEq = Current Frequency (Only updates once per display cycle)           
 
 ALARMS: ErIn = Input Voltage Error (Either too low or too high)
         ErOt = Output Voltage Error (Either too low or too high)
@@ -54,6 +60,17 @@ ALARMS: ErIn = Input Voltage Error (Either too low or too high)
 #include <EEPROM.h>
 #include <BlockNot.h> //https://github.com/EasyG0ing1/BlockNot
 #include "SevSeg.h" //https://github.com/sparkfun/SevSeg
+
+#define ok PIN_PB4
+#define plus PIN_PC4
+#define minus PIN_PC5
+#define hz PIN_PC3
+#define inVolt PIN_PC0
+#define outVolt PIN_PC1
+#define current PIN_PC2
+#define motor0Fwd PIN_PB6
+#define motor0Rev PIN_PB7
+#define power PIN_PB5
 
 
 SevSeg display1;
@@ -71,18 +88,23 @@ int TON;
 int TOFF;
 int DIFF;
 int enc;
-const int ok = PIN_PC3;
+
+/*const int ok = PIN_PC3;
 const int plus = PIN_PC4;
 const int minus = PIN_PC5;
-const int setupPin = PIN_PB4;
+///////////////////////////////////////////////////////////////
+///const int setupPin = PIN_PB4; //No Longer using Setup Pin///
+///////////////////////////////////////////////////////////////
 const int inVolt = PIN_PC0;
 const int outVolt = PIN_PC1;
 const int current = PIN_PC2;
 const int motor0Fwd = PIN_PB6;
 const int motor0Rev = PIN_PB7;
-const int power = PIN_PB5;
+const int power = PIN_PB5;*/
 int encMenu;
 int menu;
+long ontime,offtime;
+float freq/*,hzdiff*/;
 //int encMenu = 0;
 
 bool okold = false;
@@ -92,33 +114,42 @@ bool resetrefresh = false;
 bool alarmOnce = false;
 bool onTimer = false;
 bool offTimer = false;
+bool hzold = false;
 //uncomment these variables if running without setup pin
-/*
+/**/
 bool mode = false;
 bool switched = false;
-*/
+/**/
 
 BlockNot on(TON, SECONDS);
 BlockNot off(TOFF, SECONDS);
 
 void setup() {
+//setup 7Seg Display
 setupDisplay();
+//Setup Inputs
 setIN(ok);
 setIN(plus);
 setIN(minus);
-//comment setup pin if not needed
-setIN(setupPin); //change setup mode from RUN/SETUP
 setIN(inVolt);
 setIN(outVolt);
 setIN(current);
+setIN(hz);
+//comment setup pin if not needed
+//setIN(setupPin); //change setup mode from RUN/SETUP
+
+
+//Set Outputs
 setOUT(motor0Fwd);
 setOUT(motor0Rev);
 setOUT(power);
 
+//Setup Parameter Variables
 
 //This for Variables to read from Memory on startup
 //comment these variables while testing in proteus
-/**/
+//uncomment when programming Arduino/MCU
+/*
 IHV = 2 * EEPROM.read(0);
 ILV = 2 * EEPROM.read(1);
 OHV = 2 * EEPROM.read(2);
@@ -128,10 +159,11 @@ OVL = EEPROM.read(5);
 TON = EEPROM.read(6);
 TOFF = EEPROM.read(7);
 DIFF = EEPROM.read(8);
-/**/
+*/
 
 //uncomment these variables while testing in proteus
-/*
+//comment when programming Arduino/MCU
+/**/
 IHV = 560;
 ILV = 480;
 OHV = 580;
@@ -141,7 +173,9 @@ OVL = 800;
 TON = 3;
 TOFF = 0;
 DIFF = 5;
-*/
+/**/
+
+//Setup Timers (BlockNot Lib)
 
 on.setDuration(TON, SECONDS);
 off.setDuration(TOFF, SECONDS);
@@ -150,20 +184,24 @@ off.reset();
 
 }
 
-
-
 void loop() {
+  //Check OK/Menu Button
   checkok();
+  //Check Plus/Up Button
   checkplus();
+  //Check Minus/Down Button
   checkminus();
+
   //comment this if running without setup pin
-  if(read(setupPin)){
+  /*if(read(setupPin)){
     runSetup();
   } else {
     runNormal();
   }
+*/
 
-  /* Uncomment this for not using setup Pin
+  //Switch to Parameter Edit/Run Mode
+  /* Uncomment this for not using setup Pin*/
   if(mode){
     runSetup();
   } else {
@@ -177,8 +215,19 @@ void loop() {
   if(!read(ok) && !read(plus) && !read(minus) && switched == true){
     switched = false;
   }
-  */
+  /**/
 }
+
+//Check Input Frequency
+
+
+void checkhz() {
+  ontime = pulseIn(hz, HIGH);
+  //offtime = pulseIn(hz, LOW, 30000);
+  freq = 1000000.0 / (ontime * 2.0) * (5.0/5.7);//(ontime + offtime);
+}
+
+//Check If input voltage is within Low & High voltage Set by Parameters
 bool inputVok() {
   if(IV() > ILV && IV() < IHV){
     return true;
@@ -186,6 +235,7 @@ bool inputVok() {
     return false;
   }
 }
+//Check If output voltage is within Low & High voltage Set by Parameters
 bool outputVok() {
   if(OV() > OLV && OV() < OHV){
     return true;
@@ -193,6 +243,8 @@ bool outputVok() {
     return false;
   }
 }
+
+//Check If Current Load is lower than max current Set by Parameters
 bool currentok() {
   if(amp() < OVL){
     return true;
@@ -201,7 +253,9 @@ bool currentok() {
   }
 }
 
-bool diffcheck() {
+
+//Check Voltage Difference from Set Voltage
+bool diffcheck() { //(returns true if difference is more than set difference and runs motor)
   int dif = SETV - OV();
   if(dif < 0){
     dif = dif * -1;
@@ -212,6 +266,8 @@ bool diffcheck() {
     return false;
   }
 }
+
+//Run Mode
 
 void runNormal() {
   if(OV() < SETV && diffcheck() && inputVok() && currentok()){
@@ -234,6 +290,9 @@ void runNormal() {
   updatePower();
 
 }
+
+//Check if Input,Output Voltage and current is within the set range
+
 bool checksystem() {
   if(inputVok() && outputVok() && currentok()){
     return true;
@@ -241,6 +300,8 @@ bool checksystem() {
     return false;
   }
 }
+
+//Control Output Supply Relay
 
 void updatePower() {
   if(checksystem()){
@@ -253,10 +314,11 @@ void updatePower() {
   }
 }
 
+//Update Run Mode Screen
 
 void updateScreenData(bool status) {
   //uncomment !mode and comment !read(setupPin) if setupPin is not being used
-  if(/*!mode*/!read(setupPin)){
+  if(!mode/*!read(setupPin)*/){
     if(!resetrefresh){
       refresh.reset();
       resetrefresh = true;
@@ -270,8 +332,14 @@ void updateScreenData(bool status) {
       menu == 0;
     }
     if(refresh.triggered()){
+      if(menu == 6){
+        checkhz();
+      }
       menu++;
     }
+
+    //Show Error if Available
+    
     if(!status && menu == -1){
       if(!inputVok() && !outputVok() && !currentok()){
         display("ErAL", 0);
@@ -288,13 +356,13 @@ void updateScreenData(bool status) {
       }
     }
     if(menu == 0){
-      display("InUL", 0);
+      display("InPu", 0);
     }
     if(menu == 1){
       displayVar(IV(), 0);
     }
     if(menu == 2){
-      display("OPUL", 0);
+      display("Outu", 0);
     }
     if(menu == 3){
       displayVar(OV(), 0);
@@ -306,6 +374,12 @@ void updateScreenData(bool status) {
       displayVar(amp(), 0);
     }
     if(menu == 6){
+      display("FrEq", 0);
+    }
+    if(menu == 7){
+      displayVar((int)freq, 0);
+    }
+    if(menu == 8){
       if(status){
         menu = 0;
       } else {
@@ -328,9 +402,13 @@ int amp() {
   return analogRead(current);
 }
 
+//Setp display on Setup Mode
+
 void home() {
   display("SETP", 0);
 }
+
+//Setup Input High Voltage
 
 void menuIHV() {
   if(refresh.triggered(false)){
@@ -340,6 +418,8 @@ void menuIHV() {
   }
 }
 
+//Setup Input low Voltage
+
 void menuILV() {
   if(refresh.triggered(false)){
     displayVar(enc, 0);
@@ -347,6 +427,8 @@ void menuILV() {
     display("ILu", 0);
   }
 }
+
+//Setup Output High Voltage
 
 void menuOHV() {
   if(refresh.triggered(false)){
@@ -356,6 +438,8 @@ void menuOHV() {
   }
 }
 
+//Setup Output Low Voltage
+
 void menuOLV() {
   if(refresh.triggered(false)){
     displayVar(enc, 0);
@@ -363,6 +447,8 @@ void menuOLV() {
     display("OLu", 0);
   }
 }
+
+//Setup Set Voltage
 
 void menuSETV() {
   if(refresh.triggered(false)){
@@ -372,6 +458,8 @@ void menuSETV() {
   }
 }
 
+//Setup Overload
+
 void menuOVL() {
   if(refresh.triggered(false)){
     displayVar(enc, 0);
@@ -379,6 +467,8 @@ void menuOVL() {
     display("OuL", 0);
   }
 }
+
+//Setup Waiting time for Output Relay to turn on
 
 void menuTON() {
   if(refresh.triggered(false)){
@@ -388,6 +478,8 @@ void menuTON() {
   }
 }
 
+//Setup Waiting time for Output Relay to turn off
+
 void menuTOFF() {
   if(refresh.triggered(false)){
     displayVar(enc, 0);
@@ -396,6 +488,8 @@ void menuTOFF() {
   }
 }
 
+//setup voltage difference from set voltage to move motor
+
 void menuDIFF() {
   if(refresh.triggered(false)){
     displayVar(enc, 0);
@@ -403,6 +497,8 @@ void menuDIFF() {
     display("dIFF", 0);
   }
 }
+
+//Change Screens/Menus on pessing OK/Menu
 
 void runSetup() {
   if(encMenu == 0) {
@@ -443,7 +539,7 @@ void runSetup() {
   }
 }
 
-
+//Check OK Button Pressed
 
 void checkok() {
   if(read(ok) && okold == !read(ok)){
@@ -458,6 +554,8 @@ void checkok() {
   }
 }
 
+//Save Parameters to MCU EEPROM Memory (only if changed)
+
 void eepromUpdate() {
   EEPROM.update(0, IHV/2);
   EEPROM.update(1, ILV/2);
@@ -469,6 +567,8 @@ void eepromUpdate() {
   EEPROM.update(7, TOFF);
   EEPROM.update(8, DIFF);
 }
+
+//Update Parameters on Menu Change
 
 void encUpdate() {
   if(encMenu == 0) {
@@ -515,11 +615,15 @@ void encUpdate() {
     }
 }
 
+//Display INT Variable
+
 void displayVar(int var, int deci) {
   char buffer[5];
-  sprintf(buffer, "%04d", var);
+  sprintf(buffer, "%4d", var);
   display1.DisplayString(buffer, deci);
 }
+
+//Check Plus Button Pressed
 
 void checkplus() {
   if(read(plus) && plusold == !read(plus)){
@@ -531,6 +635,8 @@ void checkplus() {
   }
 }
 
+//Check Minus Button Pressed
+
 void checkminus() {
   if(read(minus) && minusold == !read(minus)){
   minusold = read(minus);
@@ -541,13 +647,19 @@ void checkminus() {
   }
 }
 
+// Setup Inputs
+
 void setIN(int PIN) {
   pinMode(PIN, INPUT);
 }
 
+//Setup Outputs
+
 void setOUT(int PIN) {
   pinMode(PIN, OUTPUT);
 }
+
+//Read Input
 
 bool read(int PIN) {
   if(digitalRead(PIN)) {
@@ -557,9 +669,12 @@ bool read(int PIN) {
   }
 }
 
+//Display String Variable
+
 void display(String str, int deci) {
   int strl = str.length();
   if(strl < 4) {
+    //char16 = no display on screen
     str = char(16) + str;
   }
 
@@ -568,6 +683,8 @@ void display(String str, int deci) {
   str.toCharArray(data, str_len);
   display1.DisplayString(data, deci);
 }
+
+//Setup Sevenseg Display
 
 void setupDisplay() {
     int displayType = COMMON_CATHODE;
