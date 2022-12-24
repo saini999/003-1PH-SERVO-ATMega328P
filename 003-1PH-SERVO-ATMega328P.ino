@@ -2,7 +2,10 @@
 Project: NAS-002-1PH-SERVO
 Description: Automatic Voltage Stablizer Control for Single Phase AC Supply
 Project URL: https://github.com/saini999/003-1PH-SERVO-ATMega238P
-Author: saini999, https://github.com/saini999 // Discord: N00R#2080
+Author: Harnoor Saini
+Github: https://github.com/saini999
+Discord: N00R#2080
+Email: noor@noorautomation.in
 
 ////////////////////////////////////////////////////
 //// THIS WILL NOT WORK WITH ARDUINO UNO BOARD /////
@@ -12,10 +15,20 @@ Author: saini999, https://github.com/saini999 // Discord: N00R#2080
 MCU: ATMega328P (28Pin PDIP)
 MCU Arduino Core: MiniCore by MCUDude //https://github.com/MCUdude/MiniCore
 MCU Clock: 8Mhz (Internal Oscillator)
-Will only work with Internal Oscillator as Occillator Pins are being used as I/O.
+
+MCU Fuse Bits: 
+ FuseLow : 0xE2
+ FuseHigh: 0xD9
+ For BOD 2.7v - FuseExtended: 0xFD
+ For BOD 4.3v - FuseExtended: 0xFC //The one i use.
+
+Fuses Can be Set by reading the microcontroller datasheet or from the Website: https://www.engbedded.com/fusecalc/   //Working As of 24Dec2022
+
+
+WARN: This will only work with Internal Oscillator as Occillator Pins are being used as I/O.
 
 Project Start Date: 17-Nov-2022
-Last Update: 17-Nov-2022
+Last Update: 24-Dec-2022
 
 Input Voltage: Pin PC0 (Through Voltage Divider)
 Output Voltage: Pin PC1 (Through Voltage Divider)
@@ -23,13 +36,13 @@ Current CT Sensor: Pin PC2 (Through Voltage Divider)
 Input AC supply for Frequency: Pin PB4 (Through Voltage Divider) ----------------+
                                                                                  | Same Pin
 Servo Motor Forward: Pin PB6                                                     | Using as Frequency
-Servo Motor Reverse: Pin PB7                                                     | Input
-                                                                                 | 
+Servo Motor Reverse: Pin PB7                                                     | Input as Setup Pin is No longer being used
+                                                                                 | Due to I/O Limitation Issues.
 ok/Menu button: Pin PC3                                                          | 
-                                                                                 | To Open Setup
-plus/Up button: Pin PC4                                                          | Press all buttons
-minus/Down button: Pin PC5                                                       | at same time
-setup/Settings button: Pin PB4 --------------------------------------------------+ 
+                                                                                 |
+plus/Up button: Pin PC4 -----------------------+ To Open Setup Press All Buttons |
+minus/Down button: Pin PC5                     |       At the Same Time!         |
+setup/Settings button: Pin PB4 ----------------+---------------------------------+ 
 
 Display I/O are Defined in setupDisplay() function at the end of the code.
 
@@ -53,30 +66,36 @@ ALARMS: ErIn = Input Voltage Error (Either too low or too high)
         ErOL = OverLoad Error (Current drawn is more than the rated current)
         ErAL = All Alarms (Possible Reason: Board is not connected to Input and Output of Dimmer/Inverter
                Load Sensor is Not connected or this is first run and parameters are yet to be Configured)
-
+        Er0b = Bugged Alarm (Possible that two Alarms are active at same time instead of all Three)
 
 */
 
 #include <EEPROM.h>
-#include <BlockNot.h> //https://github.com/EasyG0ing1/BlockNot
-#include "SevSeg.h" //https://github.com/sparkfun/SevSeg
-
-#define ok PIN_PB4
-#define plus PIN_PC4
-#define minus PIN_PC5
-#define hz PIN_PC3
-#define inVolt PIN_PC0
-#define outVolt PIN_PC1
-#define current PIN_PC2
-#define motor0Fwd PIN_PB6
-#define motor0Rev PIN_PB7
-#define power PIN_PB5
+#include <BlockNot.h> //https://github.com/EasyG0ing1/BlockNot  //Can be Installed in Arduino IDE's Library Manager
+#include "SevSeg.h" //https://github.com/sparkfun/SevSeg  //Can't be installed by library Manager, You'll have to manually downlaod the files.
 
 
+//Define Microcontroller Pins Instead of using Variables to optimize the code
+
+#define ok PIN_PB5
+#define plus PIN_PC1
+#define minus PIN_PC0
+#define hz PIN_PC2
+#define inVolt PIN_PC3
+#define outVolt PIN_PC4
+#define current PIN_PC5
+#define motor0Fwd PIN_PB4
+#define motor0Rev PIN_PB3
+#define power PIN_PB2
+
+//Intialize the SevenSegament Display
 SevSeg display1;
-
-//BlockNot screen(2, SECONDS);
+//Timer that updates Main screen every Second.
 BlockNot refresh(1, SECONDS);
+//Timer that updates all Input Variables
+BlockNot checkin(250);
+
+//All Global Variables
 bool setupm = false;
 int IHV;
 int ILV;
@@ -88,7 +107,7 @@ int TON;
 int TOFF;
 int DIFF;
 int enc;
-
+/////////////////////////////////////////////////////////////////////////////////////
 /*const int ok = PIN_PC3;
 const int plus = PIN_PC4;
 const int minus = PIN_PC5;
@@ -97,15 +116,18 @@ const int minus = PIN_PC5;
 ///////////////////////////////////////////////////////////////
 const int inVolt = PIN_PC0;
 const int outVolt = PIN_PC1;
-const int current = PIN_PC2;
+const int current = PIN_PC2;                                 No Longer Being Used....
 const int motor0Fwd = PIN_PB6;
 const int motor0Rev = PIN_PB7;
-const int power = PIN_PB5;*/
+const int power = PIN_PB5;
+int encMenu = 0;*/
+///////////////////////////////////////////////////////////////////////////////////////
 int encMenu;
 int menu;
 long ontime,offtime;
-float freq/*,hzdiff*/;
-//int encMenu = 0;
+float freq;   /*,hzdiff*/
+int involtage,outvoltage,currentload;
+
 
 bool okold = false;
 bool plusold = false;
@@ -125,9 +147,10 @@ BlockNot on(TON, SECONDS);
 BlockNot off(TOFF, SECONDS);
 
 void setup() {
-//setup 7Seg Display
+//Setup Display Data
 setupDisplay();
-//Setup Inputs
+//Setup Inputs 
+//setIN(); is a custom Function Defined at the bottom of the Program!
 setIN(ok);
 setIN(plus);
 setIN(minus);
@@ -135,21 +158,26 @@ setIN(inVolt);
 setIN(outVolt);
 setIN(current);
 setIN(hz);
-//comment setup pin if not needed
-//setIN(setupPin); //change setup mode from RUN/SETUP
-
+///////////////////////////////////////////////////////
+/////////comment setup pin if not needed///////////////
+//setIN(setupPin); //change setup mode from RUN/SETUP//
+///////////////////////////////////////////////////////
 
 //Set Outputs
+//setOUT(); is a custom Function Defined at the bottom of the Program!
 setOUT(motor0Fwd);
 setOUT(motor0Rev);
 setOUT(power);
 
 //Setup Parameter Variables
 
-//This for Variables to read from Memory on startup
+//This for Variables to read from EEPROM Memory of the uC on startup
 //comment these variables while testing in proteus
 //uncomment when programming Arduino/MCU
-/*
+/**/
+
+//using the EEPROM.h Librabry Included by the Arduino IDE & Arduino Core
+
 IHV = 2 * EEPROM.read(0);
 ILV = 2 * EEPROM.read(1);
 OHV = 2 * EEPROM.read(2);
@@ -159,26 +187,29 @@ OVL = EEPROM.read(5);
 TON = EEPROM.read(6);
 TOFF = EEPROM.read(7);
 DIFF = EEPROM.read(8);
-*/
-
+/**/
+///////////////////////////////////////////////////////////////////////
 //uncomment these variables while testing in proteus
 //comment when programming Arduino/MCU
-/**/
+/*
 IHV = 560;
-ILV = 480;
+ILV = 50;
 OHV = 580;
-OLV = 420;
-SETV = 512;
+OLV = 50;
+SETV = 220;                           ONLY FOR TESTING PURPOSES!
 OVL = 800;
 TON = 3;
 TOFF = 0;
 DIFF = 5;
-/**/
+*/
 
 //Setup Timers (BlockNot Lib)
+/////////////////////////////////////////////////////////////////////////
 
+//Setup Variable Timers after the variable is read from the Memory!
 on.setDuration(TON, SECONDS);
 off.setDuration(TOFF, SECONDS);
+//Reset the Timers after time update.
 on.reset();
 off.reset();
 
@@ -191,7 +222,7 @@ void loop() {
   checkplus();
   //Check Minus/Down Button
   checkminus();
-
+////////////////////////////////////////////////////////
   //comment this if running without setup pin
   /*if(read(setupPin)){
     runSetup();
@@ -199,7 +230,7 @@ void loop() {
     runNormal();
   }
 */
-
+///////////////////////////////////////////////////////
   //Switch to Parameter Edit/Run Mode
   /* Uncomment this for not using setup Pin*/
   if(mode){
@@ -220,16 +251,21 @@ void loop() {
 
 //Check Input Frequency
 
-
+//Checks the wavelenght of the Sine wave to calculate the frequency
+//ontime is the time that sinewave stays Positive or above the 0v Threshold
+//offtime is the time that sinewave stays negative or below the 0v Threshold
 void checkhz() {
-  ontime = pulseIn(hz, HIGH);
-  //offtime = pulseIn(hz, LOW, 30000);
-  freq = 1000000.0 / (ontime * 2.0) * (5.0/5.7);//(ontime + offtime);
+  //calculates the pulse width in milliseconds //timesout after 60ms to avoid blocking other code if no input is detected!
+  ontime = pulseIn(hz, HIGH, 60);
+  offtime = pulseIn(hz, LOW, 60);
+  //Calculates the Frequency by dividing the ontime and offtime with 1 sec time (or 1000000 ms)
+  freq = 1000000.0 / (ontime + offtime);//(ontime + offtime);
 }
+
 
 //Check If input voltage is within Low & High voltage Set by Parameters
 bool inputVok() {
-  if(IV() > ILV && IV() < IHV){
+  if(involtage > ILV && involtage < IHV){
     return true;
   } else {
     return false;
@@ -237,7 +273,7 @@ bool inputVok() {
 }
 //Check If output voltage is within Low & High voltage Set by Parameters
 bool outputVok() {
-  if(OV() > OLV && OV() < OHV){
+  if(outvoltage > OLV && outvoltage < OHV){
     return true;
   } else {
     return false;
@@ -246,7 +282,7 @@ bool outputVok() {
 
 //Check If Current Load is lower than max current Set by Parameters
 bool currentok() {
-  if(amp() < OVL){
+  if(currentload < OVL){
     return true;
   } else {
     return false;
@@ -256,7 +292,7 @@ bool currentok() {
 
 //Check Voltage Difference from Set Voltage
 bool diffcheck() { //(returns true if difference is more than set difference and runs motor)
-  int dif = SETV - OV();
+  int dif = SETV - outvoltage;
   if(dif < 0){
     dif = dif * -1;
   }
@@ -270,12 +306,21 @@ bool diffcheck() { //(returns true if difference is more than set difference and
 //Run Mode
 
 void runNormal() {
-  if(OV() < SETV && diffcheck() && inputVok() && currentok()){
+  if(checkin.triggered()){
+    //////////////////////////////
+    //OVo();                    //
+    //IVo();                    //
+    //ampo();                   //
+    ////////////////////////////// No Longer Used...!
+    checkinputs();
+  }
+  //digitalWrite(motor0Rev, HIGH);
+  if(outvoltage < SETV && diffcheck() && inputVok() && currentok()){
     digitalWrite(motor0Fwd, HIGH);
   } else {
     digitalWrite(motor0Fwd, LOW);
   }
-  if(OV() > SETV && diffcheck() && inputVok() && currentok()){
+  if(outvoltage > SETV && diffcheck() && inputVok() && currentok()){
     digitalWrite(motor0Rev, HIGH);
   } else {
     digitalWrite(motor0Rev, LOW);
@@ -294,23 +339,29 @@ void runNormal() {
 //Check if Input,Output Voltage and current is within the set range
 
 bool checksystem() {
-  if(inputVok() && outputVok() && currentok()){
-    return true;
-  } else {
-    return false;
-  }
+  if(inputVok()) {
+    if(outputVok()) {
+      if(currentok()){
+            return true;
+      } else { return false; }
+    } else { return false; }
+  } else { return false; }
 }
 
 //Control Output Supply Relay
 
 void updatePower() {
   if(checksystem()){
-  if(on.triggered(false))  
-    digitalWrite(power, HIGH);
-    off.reset();
-  } else if(off.triggered(false)) {
-    digitalWrite(power, LOW);
-    on.reset();
+    if(on.triggered(false)){  
+      digitalWrite(power, HIGH);
+      off.reset();
+    }
+  }
+  else {
+    if(off.triggered(false)) {
+      digitalWrite(power, LOW);
+      on.reset();
+    }
   }
 }
 
@@ -332,8 +383,28 @@ void updateScreenData(bool status) {
       menu == 0;
     }
     if(refresh.triggered()){
-      if(menu == 6){
-        checkhz();
+
+      OVo();
+      IVo();
+      ampo();
+
+
+      switch (menu)
+      {
+        case 6:
+          checkhz();
+          break;
+        case 0:
+          IVo();
+          break;
+        case 2:
+          OVo();
+          break;
+        case 4:
+          ampo();
+          break;
+        default:
+          break;
       }
       menu++;
     }
@@ -355,23 +426,59 @@ void updateScreenData(bool status) {
         }
       }
     }
-    if(menu == 0){
+
+    switch (menu)
+    {
+    case 0:
+      display("InPu", 0);
+      break;
+    case 1:
+      displayVar(involtage, 0);
+      break;
+    case 2:
+      display("Outu", 0);
+      break;
+    case 3:
+      displayVar(outvoltage, 0);
+      break;
+    case 4:
+      display("LoAd", 0);
+      break;
+    case 5:
+      displayVar(currentload, 0);
+      break;
+    case 6:
+      display("FrEq", 0);
+      break;
+    case 7:
+      displayVar((int)freq, 0);
+      break;
+    case 8:
+      if(status){
+        menu = 0;
+      } else {
+        menu = -1;
+      }
+      break;
+    }
+
+    /*if(menu == 0){
       display("InPu", 0);
     }
     if(menu == 1){
-      displayVar(IV(), 0);
+      displayVar(involtage, 0);
     }
     if(menu == 2){
       display("Outu", 0);
     }
     if(menu == 3){
-      displayVar(OV(), 0);
+      displayVar(outvoltage, 0);
     }
     if(menu == 4){
       display("LoAd", 0);
     }
     if(menu == 5){
-      displayVar(amp(), 0);
+      displayVar(currentload, 0);
     }
     if(menu == 6){
       display("FrEq", 0);
@@ -385,23 +492,67 @@ void updateScreenData(bool status) {
       } else {
         menu = -1;
       }
-    }
+    }*/
   }
 }
-
-
-int IV() {
-  return analogRead(inVolt);
+//update inputs once based on highest voltage...
+////////////////////////////////////////////////////////////////
+/*
+void IVo() {
+  involtage = 0.343 * analogRead(inVolt);
 }
 
-int OV() {
-  return analogRead(outVolt);
+void OVo() {
+  outvoltage = 0.343 * analogRead(outVolt);
 }
 
-int amp() {
-  return analogRead(current);
+void ampo() {
+  currentload = 0.343 * analogRead(current); /// No Longer Used...
+}
+*/
+/////////////////////////////////////////////////////////////////
+
+
+//update inputs once based on highest voltage...
+void checkinputs() {
+  IVo();
+  OVo();
+  ampo();
 }
 
+void IVo() {
+float inpv;
+for(int i=0; i<10; i++) {
+  if((0.343 * analogRead(inVolt)) > inpv){
+    inpv = 0.343 * analogRead(inVolt);
+    }
+  }
+involtage = inpv;
+}
+
+
+
+void OVo() {
+float oppv;
+for(int i=0; i<10; i++) {
+  if((0.343 * analogRead(outVolt)) > oppv){
+    oppv = 0.343 * analogRead(outVolt);
+    }
+  }
+outvoltage = oppv;
+}
+
+void ampo() {
+float ampov;
+for(int i=0; i<10; i++) {
+  if((0.343 * analogRead(current)) > ampov){
+    ampov = 0.343 * analogRead(current);
+    }
+  }
+currentload = ampov;
+}
+
+////////////////////////////////////////////////////////////
 //Setp display on Setup Mode
 
 void home() {
@@ -498,45 +649,55 @@ void menuDIFF() {
   }
 }
 
+void menuEND() {
+  display("End", 0);
+}
+
 //Change Screens/Menus on pessing OK/Menu
 
 void runSetup() {
-  if(encMenu == 0) {
+  digitalWrite(motor0Fwd, LOW);
+  digitalWrite(motor0Rev, LOW);
+  
+  switch (encMenu)
+  {
+  case 0:
     home();
-  }
-  if(encMenu == 1) {
+    break;
+  case 1:
     menuIHV();
-  }
-  if(encMenu == 2) {
+    break;
+  case 2:
     menuILV();
-  }
-  if(encMenu == 3) {
+    break;
+  case 3:
     menuOHV();
-  }
-  if(encMenu == 4) {
+    break;
+  case 4:
     menuOLV();
-  }
-  if(encMenu == 5) {
+    break;
+  case 5:
     menuSETV();
-  }
-  if(encMenu == 6) {
+    break;
+  case 6:
     menuOVL();
-  }
-  if(encMenu == 7) {
+    break;
+  case 7:
     menuTON();
-  }
-  if(encMenu == 8) {
+    break;
+  case 8:
     menuTOFF();
-  }
-  if(encMenu == 9) {
+    break;
+  case 9:
     menuDIFF();
-  }
-  if(encMenu > 9) {
+    break;
+  case 10:
+    menuEND();
+    break;
+  default:
     encMenu = 0;
-  }
-  if(encMenu < 0) {
-    encMenu = 9;
-  }
+    break;
+  } 
 }
 
 //Check OK Button Pressed
@@ -571,49 +732,69 @@ void eepromUpdate() {
 //Update Parameters on Menu Change
 
 void encUpdate() {
-  if(encMenu == 0) {
-    DIFF = enc;
-  }
-  if(encMenu == 1) {
+  
+  switch (encMenu)
+  {
+  case 0:
+    break;
+  case 1:
     enc = IHV;
-    }
-  if(encMenu == 2) {
+    done();
+    break;
+  case 2:
     IHV = enc;
     enc = ILV;
-    }
-  if(encMenu == 3) {
+    done();
+    break;
+  case 3:
     ILV = enc;
     enc = OHV;
-    }
-  if(encMenu == 4) {
+    done();
+    break;
+  case 4:
     OHV = enc;
     enc = OLV;
-    }
-  if(encMenu == 5) {
+    done();
+    break;
+  case 5:
     OLV = enc;
     enc = SETV;
-    }
-  if(encMenu == 6) {
+    done();
+    break;
+  case 6:
     SETV = enc;
     enc = OVL;
-    }
-  if(encMenu == 7) {
+    done();
+    break;
+  case 7:
     OVL = enc;
     enc = TON;
-    }
-  if(encMenu == 8) {
+    done();
+    break;
+  case 8:
     TON = enc;
     enc = TOFF;
     on.setDuration(TON, SECONDS);
     on.reset();
-    }
-  if(encMenu == 9) {
+    done();
+    break;
+  case 9:
     TOFF = enc;
     enc = DIFF;
     off.setDuration(TOFF, SECONDS);
     off.reset();
-    }
+    done();
+    break;
+  case 10:
+    DIFF = enc;
+    done();
+    break;
+  default:
+    break;
+  }
 }
+
+void done() {display("donE", 0);}
 
 //Display INT Variable
 
@@ -687,22 +868,22 @@ void display(String str, int deci) {
 //Setup Sevenseg Display
 
 void setupDisplay() {
-    int displayType = COMMON_CATHODE;
+    int displayType = COMMON_ANODE;
 
-   int digit1 = PIN_PB0; 
-   int digit2 = PIN_PB1; 
-   int digit3 = PIN_PB2; 
-   int digit4 = PIN_PB3; 
+   int digit1 = PIN_PB1; 
+   int digit2 = PIN_PD4; 
+   int digit3 = PIN_PD1; 
+   int digit4 = PIN_PD2; 
    
    
-   int segA = PIN_PD0; 
-   int segB = PIN_PD1;
-   int segC = PIN_PD2; 
-   int segD = PIN_PD3; 
-   int segE = PIN_PD4; 
-   int segF = PIN_PD5; 
-   int segG = PIN_PD6; 
-   int segDP = PIN_PD7; 
+   int segA = PIN_PD6; 
+   int segB = PIN_PD0;
+   int segC = PIN_PB6; 
+   int segD = PIN_PD7; 
+   int segE = PIN_PB0; 
+   int segF = PIN_PB7; 
+   int segG = PIN_PD3; 
+   int segDP = PIN_PD5; 
    
   int numberOfDigits = 4; 
 
